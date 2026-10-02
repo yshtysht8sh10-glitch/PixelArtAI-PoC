@@ -1,0 +1,21 @@
+Create a 16x16 pixel-art sprite.
+
+Object:
+A cute red slime viewed from the front.
+
+Available palette:
+0 = transparent
+1 = black
+2 = red
+3 = white
+
+Output rules:
+- Output exactly 16 lines.
+- Each line must contain exactly 16 characters.
+- Use only 0, 1, 2, or 3.
+- Each character represents exactly one pixel.
+- Do not output Markdown code fences.
+- Do not output any explanation or extra text.
+- Keep the sprite centered.
+- Use black for the outline and facial details.
+- Use white only for eye highlights if needed.
