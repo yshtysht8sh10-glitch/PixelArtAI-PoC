@@ -1,0 +1,24 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Future JavaScript/TypeScript PoC
+node_modules/
+dist/
+coverage/
+
+# Future Python utilities
+__pycache__/
+*.py[cod]
+.venv/
+venv/
