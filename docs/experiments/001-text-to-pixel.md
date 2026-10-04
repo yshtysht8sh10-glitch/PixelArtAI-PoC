@@ -196,3 +196,56 @@ This is a different failure mode from the Llama 3 baseline: Qwen2.5-Coder 7B pro
 #### Next
 
 Run the exact same prompt against `qwen3-coder:30b` with a fresh Ollama session. Do not modify the prompt yet. After that run, compare structural compliance and visual/spatial behavior across the valid Llama 3, Qwen2.5-Coder 7B, and Qwen3-Coder 30B results.
+
+
+### Run 001-D
+
+- Date: 2026-10-04
+- Model: `qwen3-coder:30b`
+- Ollama version: Not recorded
+- Duration: Not recorded
+
+#### Raw output
+
+```text
+0000000000000000
+0000000000000000
+0000000000000000
+0000000000000000
+0000000222200000
+0000002222220000
+0000022222222000
+0000222222222200
+0002222222222220
+0022222222222222
+0222222222222222
+0222222222222222
+0222222222222222
+0022222222222220
+0002222222222200
+0000000000000000
+```
+
+#### Mechanical validation
+
+- Width: PASS — 16 characters in every row
+- Height: PASS — exactly 16 rows
+- Palette validity: PASS — only allowed palette indices are used
+- Extra text: PASS — no prose in the reported model output
+- Parseable: PASS
+
+#### Visual assessment
+
+PARTIAL. The output is not yet a complete character sprite because it has no outline, eyes, or facial details. However, unlike the previous valid runs, the red pixels form a coherent centered silhouette with a narrow top and broad rounded/blob-like body. It is recognizably attempting a slime-like shape.
+
+#### Observations
+
+This is the strongest spatial result so far. `qwen3-coder:30b` satisfies all mechanical serialization constraints and produces a coherent 2D silhouette rather than horizontal bands or a simple rectangle.
+
+The model still ignores important semantic palette instructions: black is not used for the outline/facial details and white is not used for eye highlights. Therefore the experiment does not yet pass the full requested sprite specification.
+
+The improvement from Qwen2.5-Coder 7B to Qwen3-Coder 30B is substantial enough that model capability appears to matter under the unchanged prompt. At the same time, the remaining failures show that model size alone does not solve all instruction-following and pixel-art composition requirements.
+
+#### Next
+
+Treat Run 001-D as the best baseline from the unchanged-prompt comparison. Before moving to local editing, perform a second prompt iteration with `qwen3-coder:30b` that makes the required outline, eyes, and facial structure more explicit while keeping the 16x16/palette/output constraints unchanged. Preserve Run 001-D as the pre-prompt-tuning baseline.
