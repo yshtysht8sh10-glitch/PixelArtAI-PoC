@@ -94,10 +94,13 @@ The result suggests that the experiment should distinguish **format compliance**
 Keep this failed result unchanged as baseline data. Run the exact same prompt against `qwen2.5-coder:7b` and `qwen3-coder:30b` before changing the prompt. This will show whether model choice alone improves spatial/pixel reasoning. After the same-prompt comparison, iterate on the prompt if necessary.
 
 
-### Run 001-B
+### Run 001-B — INVALID
+
+> Invalid run: the command `ollama run qwen2.5-coder:7b` was entered inside the already-running Llama 3 interactive session, so the model was not actually switched. This run is retained as an experiment-operation record and must not be used for model comparison.
 
 - Date: 2026-10-04
-- Model: `qwen2.5-coder:7b`
+- Intended model: `qwen2.5-coder:7b`
+- Actual model: `llama3:latest`
 - Ollama version: Not recorded
 - Duration: Not recorded
 
@@ -143,3 +146,53 @@ Mechanical constraint compliance remains strong, while semantic/spatial complian
 #### Next
 
 Run the exact same prompt against `qwen3-coder:30b` before changing the prompt. If the 30B model produces the same band-like pattern, the next experiment should focus on prompt representation or intermediate spatial guidance rather than model size alone.
+
+
+### Run 001-C
+
+- Date: 2026-10-04
+- Model: `qwen2.5-coder:7b`
+- Ollama version: Not recorded
+- Duration: Not recorded
+
+#### Raw output
+
+```text
+0000000000000000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000002222220000
+0000000000000000
+```
+
+#### Mechanical validation
+
+- Width: PASS — 16 characters in every returned row
+- Height: FAIL — 15 rows returned instead of 16
+- Palette validity: PASS — only 0 and 2 are used
+- Extra text: PASS — no prose in the reported model output
+- Parseable: FAIL under the strict 16x16 schema because one row is missing
+
+#### Visual assessment
+
+FAIL. The output is a centered red rectangle/vertical block, not a recognizable front-facing slime. It contains no black outline, facial details, or white eye highlights.
+
+#### Observations
+
+Unlike the invalid Run 001-B, this is a genuine `qwen2.5-coder:7b` result. The model preserved row width and palette legality, but failed the exact-height constraint and the semantic drawing task.
+
+This is a different failure mode from the Llama 3 baseline: Qwen2.5-Coder 7B produced a much simpler centered geometric block rather than horizontal palette bands. That difference is useful evidence that the model is affecting the spatial output, even though neither model currently produces usable pixel art.
+
+#### Next
+
+Run the exact same prompt against `qwen3-coder:30b` with a fresh Ollama session. Do not modify the prompt yet. After that run, compare structural compliance and visual/spatial behavior across the valid Llama 3, Qwen2.5-Coder 7B, and Qwen3-Coder 30B results.
