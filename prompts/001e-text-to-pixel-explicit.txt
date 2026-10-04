@@ -1,0 +1,30 @@
+Create a 16x16 pixel-art sprite.
+
+Object:
+A cute red slime viewed from the front.
+
+Available palette:
+0 = transparent
+1 = black
+2 = red
+3 = white
+
+Required visual structure:
+- The slime must be one connected, centered body.
+- The body must have a rounded/blob-like silhouette: narrower near the top and wider near the bottom.
+- Draw a continuous black outline around the red body wherever practical.
+- The interior of the body must be primarily red.
+- The slime must have exactly two visible eyes, placed symmetrically on the face.
+- Each eye must contain black pixels so the face is clearly recognizable.
+- White may be used only inside the eyes as small highlights.
+- Do not create large white regions.
+- Do not place isolated pixels away from the body.
+- Leave transparent space around the sprite.
+
+Output rules:
+- Output exactly 16 lines.
+- Each line must contain exactly 16 characters.
+- Use only 0, 1, 2, or 3.
+- Each character represents exactly one pixel.
+- Do not output Markdown code fences.
+- Do not output any explanation or extra text.
