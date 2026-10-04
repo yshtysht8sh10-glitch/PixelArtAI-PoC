@@ -1,0 +1,48 @@
+Design a cute red slime viewed from the front for a 16x16 pixel-art canvas.
+
+Do NOT output the 16x16 bitmap.
+Instead, output only a JSON object describing the sprite as structured data.
+
+Coordinate system:
+- x ranges from 0 to 15, left to right.
+- y ranges from 0 to 15, top to bottom.
+
+Palette:
+- 0 = transparent
+- 1 = black
+- 2 = red
+- 3 = white
+
+Requirements:
+- The slime is centered.
+- The body is a rounded blob, narrower at the top and wider at the bottom.
+- The body uses red fill.
+- The slime has exactly two separate eyes.
+- The eyes are symmetric around the center of the sprite.
+- The eyes must not touch.
+- Use black for the eyes.
+- Optional white highlights may be specified.
+- All coordinates must be inside the 16x16 canvas.
+
+Output exactly this JSON structure and nothing else:
+
+{
+  "canvas": { "width": 16, "height": 16 },
+  "body": {
+    "fill": 2,
+    "rows": [
+      { "y": 0, "xStart": 0, "xEnd": 0 }
+    ]
+  },
+  "eyes": [
+    { "name": "left", "color": 1, "pixels": [{ "x": 0, "y": 0 }] },
+    { "name": "right", "color": 1, "pixels": [{ "x": 0, "y": 0 }] }
+  ],
+  "highlights": []
+}
+
+Replace the example coordinates with appropriate coordinates for the slime.
+For body.rows, include only rows occupied by the body.
+xStart and xEnd are inclusive.
+Do not output Markdown code fences.
+Do not output explanations.
