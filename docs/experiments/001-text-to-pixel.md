@@ -7,7 +7,7 @@ Confirm whether a local LLM can generate a valid 16x16 pixel matrix from a natur
 ## Environment
 
 - Runtime: Ollama
-- Model: TBD per run
+- Model: `llama3:latest`
 - Canvas: 16x16
 - Palette size: 4
 
@@ -35,43 +35,60 @@ See [../../prompts/001-text-to-pixel.txt](../../prompts/001-text-to-pixel.txt).
 
 ## Validation checklist
 
-- [ ] 16 rows
-- [ ] Every row is 16 characters
-- [ ] Only 0/1/2/3 are used
-- [ ] No extra prose
+- [x] 16 rows
+- [x] Every row is 16 characters
+- [x] Only 0/1/2/3 are used
+- [x] No extra prose
 - [ ] Sprite is visually recognizable as a front-facing red slime
 
 ## Runs
 
 ### Run 001-A
 
-- Date:
-- Model:
-- Ollama version:
-- Duration:
+- Date: 2026-10-04
+- Model: `llama3:latest`
+- Ollama version: Not recorded
+- Duration: Not recorded
 
 #### Raw output
 
 ```text
-TBD
+0000000000000000
+0011111111111111
+0022222222222222
+0033333333333333
+0033333333333333
+0033333333333333
+0022222222222222
+0011111111111111
+0000000000000000
+0000000000000000
+0000000000000000
+0000020000000000
+0000000000000000
+0000010000000000
+0000000000000000
+0000000000000000
 ```
 
 #### Mechanical validation
 
-- Width:
-- Height:
-- Palette validity:
-- Extra text:
-- Parseable:
+- Width: PASS — 16 characters in every row
+- Height: PASS — exactly 16 rows
+- Palette validity: PASS — only 0/1/2/3 used
+- Extra text: PASS — no prose or Markdown wrapper
+- Parseable: PASS
 
 #### Visual assessment
 
-TBD
+FAIL. The output satisfies the structural format but is not recognizable as a centered, front-facing red slime. It mainly forms horizontal color bands, uses white as a large filled region rather than only an eye highlight, and includes isolated pixels below the main shape.
 
 #### Observations
 
-TBD
+This is a useful first result: `llama3:latest` understood the strict matrix serialization rules much better than the semantic drawing task. Mechanical compliance is 4/4, while visual/semantic compliance fails.
+
+The result suggests that the experiment should distinguish **format compliance** from **pixel-art quality** instead of treating generation as a single pass/fail criterion.
 
 #### Next
 
-TBD
+Keep this failed result unchanged as baseline data. Run the exact same prompt against `qwen2.5-coder:7b` and `qwen3-coder:30b` before changing the prompt. This will show whether model choice alone improves spatial/pixel reasoning. After the same-prompt comparison, iterate on the prompt if necessary.
