@@ -27,7 +27,7 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <h1>Pixel String Viewer</h1>
 <div class="grid">
 <section class="card">
-<label for="source">Pixel文字列</label><div class="row" style="margin:0 0 10px"><button class="secondary" id="bmpLoad">BMP読込</button><input id="bmpFile" type="file" accept=".bmp,image/bmp" hidden></div>
+<label for="source">Pixel文字列</label><div class="row" style="margin:0 0 10px"><button class="secondary" id="bmpLoad">BMP読込</button><button class="secondary" id="copySource">クリップボードにコピー</button><input id="bmpFile" type="file" accept=".bmp,image/bmp" hidden></div>
 <textarea id="source" spellcheck="false">@format matrix-char
 0000000000000000
 0000000000000000
@@ -124,6 +124,17 @@ function render(){
 }
 let timer; function schedule(){clearTimeout(timer);timer=setTimeout(render,120)}
 source.addEventListener('input',schedule); paletteText.addEventListener('input',schedule);
+document.querySelector('#copySource').addEventListener('click',async()=>{
+  try{
+    await navigator.clipboard.writeText(source.value);
+    status.className='status'; status.textContent='Pixel文字列をクリップボードにコピーしました';
+  }catch(e){
+    source.focus(); source.select();
+    const ok=document.execCommand('copy');
+    status.className=ok?'status':'status error';
+    status.textContent=ok?'Pixel文字列をクリップボードにコピーしました':'コピーに失敗しました';
+  }
+});
 document.querySelector('#render').addEventListener('click',render);
 
 function paletteKey(r,g,b,a=255){return r+','+g+','+b+','+a}
