@@ -27,7 +27,7 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <h1>Pixel String Viewer</h1>
 <div class="grid">
 <section class="card">
-<label for="source">Pixel文字列</label>
+<label for="source">Pixel文字列</label><div class="row" style="margin:0 0 10px"><button class="secondary" id="bmpLoad">BMP読込</button><input id="bmpFile" type="file" accept=".bmp,image/bmp" hidden></div>
 <textarea id="source" spellcheck="false">@format matrix-char
 0000000000000000
 0000000000000000
@@ -125,6 +125,51 @@ function render(){
 let timer; function schedule(){clearTimeout(timer);timer=setTimeout(render,120)}
 source.addEventListener('input',schedule); paletteText.addEventListener('input',schedule);
 document.querySelector('#render').addEventListener('click',render);
+
+const bmpFile=document.querySelector('#bmpFile');
+document.querySelector('#bmpLoad').addEventListener('click',()=>bmpFile.click());
+
+function paletteKey(r,g,b,a=255){return r+','+g+','+b+','+a}
+function paletteReverse(){
+  const p=parsePalette(paletteText.value), rev=new Map();
+  for(const [token,rgba] of p) rev.set(paletteKey(...rgba),token);
+  return rev;
+}
+bmpFile.addEventListener('change',()=>{
+  const file=bmpFile.files && bmpFile.files[0]; if(!file) return;
+  const url=URL.createObjectURL(file), img=new Image();
+  img.onload=()=>{
+    try{
+      const tmp=document.createElement('canvas'); tmp.width=img.naturalWidth; tmp.height=img.naturalHeight;
+      const t=tmp.getContext('2d',{willReadFrequently:true}); t.drawImage(img,0,0);
+      const data=t.getImageData(0,0,tmp.width,tmp.height).data, rev=paletteReverse();
+      const rows=[];
+      for(let y=0;y<tmp.height;y++){
+        let row='';
+        for(let x=0;x<tmp.width;x++){
+          const i=(y*tmp.width+x)*4, key=paletteKey(data[i],data[i+1],data[i+2],data[i+3]);
+          let token=rev.get(key);
+          // BMP generally has no alpha; allow opaque RGB to match a palette entry whose RGB is identical.
+          if(token===undefined){
+            const matches=[];
+            for(const [k,v] of parsePalette(paletteText.value)) if(v[0]===data[i]&&v[1]===data[i+1]&&v[2]===data[i+2]) matches.push(k);
+            if(matches.length===1) token=matches[0];
+          }
+          if(token===undefined) throw new Error('未定義色 RGB('+data[i]+','+data[i+1]+','+data[i+2]+') at ('+x+','+y+')');
+          if([...token].length!==1) throw new Error('matrix-charではパレット番号は1文字である必要があります: '+token);
+          row+=token;
+        }
+        rows.push(row);
+      }
+      source.value='@format matrix-char\n'+rows.join('\n');
+      render();
+      status.textContent+=' / BMP読込完了';
+    }catch(e){status.className='status error';status.textContent=e.message}
+    finally{URL.revokeObjectURL(url);bmpFile.value=''}
+  };
+  img.onerror=()=>{URL.revokeObjectURL(url);bmpFile.value='';status.className='status error';status.textContent='BMPを読み込めませんでした'};
+  img.src=url;
+});
 document.querySelector('#save').addEventListener('click',()=>{
   if(!render()) return;
   const a=document.createElement('a'); a.download='pixel-art.png'; a.href=canvas.toDataURL('image/png'); a.click();
