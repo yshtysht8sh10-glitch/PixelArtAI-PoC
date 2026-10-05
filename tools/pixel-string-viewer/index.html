@@ -126,9 +126,6 @@ let timer; function schedule(){clearTimeout(timer);timer=setTimeout(render,120)}
 source.addEventListener('input',schedule); paletteText.addEventListener('input',schedule);
 document.querySelector('#render').addEventListener('click',render);
 
-const bmpFile=document.querySelector('#bmpFile');
-document.querySelector('#bmpLoad').addEventListener('click',()=>bmpFile.click());
-
 function paletteKey(r,g,b,a=255){return r+','+g+','+b+','+a}
 function paletteReverse(){
   const p=parsePalette(paletteText.value), rev=new Map();
