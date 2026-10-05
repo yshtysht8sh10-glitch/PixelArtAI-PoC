@@ -27,7 +27,7 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <h1>Pixel String Viewer</h1>
 <div class="grid">
 <section class="card">
-<label for="source">Pixel文字列</label><div class="row" style="margin:0 0 10px"><button class="secondary" id="bmpLoad">BMP読込</button><button class="secondary" id="copySource">クリップボードにコピー</button><input id="bmpFile" type="file" accept=".bmp,image/bmp" hidden></div>
+<label for="source">Pixel文字列</label><div class="row" style="margin:0 0 10px"><button class="secondary" id="bmpLoad">BMP読込</button><button class="secondary" id="copySource">文字列をコピー</button><button class="secondary" id="copyBundle">文字列＋パレットをコピー</button><input id="bmpFile" type="file" accept=".bmp,image/bmp" hidden></div>
 <textarea id="source" spellcheck="false">@format matrix-char
 0000000000000000
 0000000000000000
@@ -124,16 +124,34 @@ function render(){
 }
 let timer; function schedule(){clearTimeout(timer);timer=setTimeout(render,120)}
 source.addEventListener('input',schedule); paletteText.addEventListener('input',schedule);
-document.querySelector('#copySource').addEventListener('click',async()=>{
+async function copyText(textValue, successMessage){
   try{
-    await navigator.clipboard.writeText(source.value);
-    status.className='status'; status.textContent='Pixel文字列をクリップボードにコピーしました';
+    await navigator.clipboard.writeText(textValue);
+    status.className='status'; status.textContent=successMessage;
+    return;
   }catch(e){
-    source.focus(); source.select();
-    const ok=document.execCommand('copy');
+    const tmp=document.createElement('textarea');
+    tmp.value=textValue; tmp.style.position='fixed'; tmp.style.opacity='0';
+    document.body.appendChild(tmp); tmp.focus(); tmp.select();
+    const ok=document.execCommand('copy'); tmp.remove();
     status.className=ok?'status':'status error';
-    status.textContent=ok?'Pixel文字列をクリップボードにコピーしました':'コピーに失敗しました';
+    status.textContent=ok?successMessage:'コピーに失敗しました';
   }
+}
+document.querySelector('#copyBundle').addEventListener('click',async()=>{
+  const src=source.value.replace(/\r/g,'').split('\n');
+  const header=src.shift()||'';
+  const bundle=[
+    header,
+    '@palette',
+    paletteText.value.trim(),
+    '@endpalette',
+    ...src
+  ].join('\n');
+  await copyText(bundle,'Pixel文字列＋パレットをクリップボードにコピーしました');
+});
+document.querySelector('#copySource').addEventListener('click',async()=>{
+  await copyText(source.value,'Pixel文字列をクリップボードにコピーしました');
 });
 document.querySelector('#render').addEventListener('click',render);
 
