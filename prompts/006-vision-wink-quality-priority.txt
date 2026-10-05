@@ -1,0 +1,49 @@
+Look at this pixel-art image: D:\working\PixelArtAI-PoC\inputs\experiment005-slime-512x512.png
+
+The image is an enlarged nearest-neighbor rendering of an original 16x16 pixel-art sprite.
+
+The original 16x16 palette is:
+0 = transparent/background
+1 = black
+2 = red
+3 = white
+
+User request:
+Make the slime clearly look like it is winking by closing its left eye.
+
+Original 16x16 coordinate system:
+x = 0..15 from left to right.
+y = 0..15 from top to bottom.
+
+The current left eye is black at (6, 8).
+The current right eye is black at (9, 8).
+
+Use the visual appearance of the supplied image to decide how the closed/winking left eye should be drawn.
+
+Visual goal:
+- The final sprite should be clearly recognizable to a human viewer as winking.
+- Simply erasing the left eye is NOT sufficient.
+- You may add or change nearby pixels around the left eye if needed to create a recognizable closed-eye expression.
+- Decide the visual shape yourself. No specific closed-eye shape is prescribed.
+
+Preservation rules:
+- Preserve the right eye.
+- Preserve unrelated parts of the slime.
+- Change only the local area needed to create the expression.
+
+Output rules:
+- Return only the pixel changes required to transform the current sprite.
+- Return changes in ORIGINAL 16x16 coordinates, not 512x512 coordinates.
+- Every change must specify x, y, and the new palette color.
+- Coordinates must stay inside the 16x16 canvas.
+- Use only colors 0, 1, 2, or 3.
+- Return JSON only.
+- Do not return the complete bitmap.
+- Do not explain your answer.
+
+Output format:
+{
+  "changes": [
+    { "x": 0, "y": 0, "color": 0 }
+  ]
+}
