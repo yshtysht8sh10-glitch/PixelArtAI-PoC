@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pixel String Viewer</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:dark}
+*{box-sizing:border-box} body{margin:0;background:#111318;color:#eee}
+main{max-width:1200px;margin:auto;padding:24px}
+h1{font-size:22px;margin:0 0 18px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.card{background:#1b1e25;border:1px solid #30343e;border-radius:12px;padding:16px}
+label{display:block;font-weight:700;margin-bottom:8px}
+textarea{width:100%;min-height:390px;resize:vertical;background:#0e1014;color:#e8e8e8;border:1px solid #3b404b;border-radius:8px;padding:12px;font:14px/1.45 Consolas,monospace}
+#palette{min-height:150px}.previewWrap{display:flex;align-items:center;justify-content:center;min-height:390px;background:#0e1014;border-radius:8px;overflow:auto;padding:16px}
+canvas{image-rendering:pixelated;image-rendering:crisp-edges;max-width:100%;max-height:70vh;background:repeating-conic-gradient(#ddd 0 25%,#aaa 0 50%) 50%/16px 16px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}
+button{border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:pointer}
+.primary{background:#f4f4f4;color:#111}.secondary{background:#303540;color:#fff}
+.status{font-size:13px;color:#aeb5c2}.error{color:#ff8e8e}
+.help{font-size:13px;color:#aeb5c2;line-height:1.6;margin-top:10px}
+code{background:#0e1014;padding:2px 5px;border-radius:4px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body><main>
+<h1>Pixel String Viewer</h1>
+<div class="grid">
+<section class="card">
+<label for="source">Pixel文字列</label>
+<textarea id="source" spellcheck="false">@format matrix-char
+0000000000000000
+0000000000000000
+0000000000000000
+0000000000000000
+0000022222200000
+0000222222220000
+0002222222222000
+0022222222222200
+0022221221222200
+0002222222200000
+0000222222220000
+0000022222200000
+0000000000000000
+0000000000000000
+0000000000000000
+0000000000000000</textarea>
+<div class="help">1行目はフォーマット指定子。現在は <code>@format matrix-char</code>（1文字=1 pixel）と <code>@format matrix-csv</code>（カンマ区切り）に対応。</div>
+</section>
+<section class="card">
+<label>プレビュー</label>
+<div class="previewWrap"><canvas id="canvas"></canvas></div>
+<div class="row">
+<button class="primary" id="save">PNG保存</button>
+<span id="status" class="status"></span>
+</div>
+</section>
+<section class="card">
+<label for="palette">パレット（番号 = RGB/RGBA）</label>
+<textarea id="palette" spellcheck="false">0 = 0,0,0,0
+1 = 0,0,0,255
+2 = 255,0,0,255
+3 = 255,255,255,255</textarea>
+<div class="help">例: <code>2 = 255,0,0</code>。RGBのみならα=255。透明色は <code>0,0,0,0</code>。</div>
+</section>
+<section class="card">
+<label>操作</label>
+<div class="row"><button class="secondary" id="render">再描画</button></div>
+<div class="help">入力またはパレットを編集すると自動で再描画します。保存されるPNGは元のpixelサイズです（例: 16×16）。プレビューだけ拡大表示します。</div>
+</section>
+</div>
+</main>
+<script>
+const source=document.querySelector('#source'), paletteText=document.querySelector('#palette');
+const canvas=document.querySelector('#canvas'), ctx=canvas.getContext('2d');
+const status=document.querySelector('#status');
+
+function parsePalette(text){
+  const map=new Map();
+  for(const raw of text.split(/\r?\n/)){
+    const line=raw.trim(); if(!line) continue;
+    const m=line.match(/^([^=\s]+)\s*=\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*(\d{1,3}))?$/);
+    if(!m) throw new Error('パレット形式エラー: '+line);
+    const rgba=m.slice(2).map(v=>v===undefined?255:Number(v));
+    if(rgba.some(v=>v<0||v>255)) throw new Error('RGB/RGBAは0～255です: '+line);
+    map.set(m[1],rgba);
+  }
+  if(!map.size) throw new Error('パレットが空です');
+  return map;
+}
+const parsers={
+  'matrix-char': lines=>lines.filter(x=>x.length).map(x=>[...x.trim()]),
+  'matrix-csv': lines=>lines.filter(x=>x.trim().length).map(x=>x.split(',').map(v=>v.trim()))
+};
+function parseSource(text){
+  const lines=text.replace(/\r/g,'').split('\n');
+  const header=(lines.shift()||'').trim();
+  const m=header.match(/^@format\s+([\w-]+)$/);
+  if(!m) throw new Error('1行目に @format <形式> を指定してください');
+  const parser=parsers[m[1]];
+  if(!parser) throw new Error('未対応フォーマット: '+m[1]);
+  const rows=parser(lines);
+  if(!rows.length) throw new Error('pixelデータがありません');
+  const w=rows[0].length;
+  if(!w||rows.some(r=>r.length!==w)) throw new Error('行ごとのpixel数が一致していません');
+  return {format:m[1],rows,width:w,height:rows.length};
+}
+function render(){
+  try{
+    const p=parsePalette(paletteText.value), d=parseSource(source.value);
+    for(const row of d.rows) for(const token of row) if(!p.has(token)) throw new Error('未定義のパレット番号: '+token);
+    canvas.width=d.width; canvas.height=d.height;
+    const img=ctx.createImageData(d.width,d.height);
+    let i=0;
+    for(const row of d.rows) for(const token of row){
+      const c=p.get(token); img.data.set(c,i); i+=4;
+    }
+    ctx.putImageData(img,0,0);
+    const scale=Math.max(1,Math.min(32,Math.floor(480/Math.max(d.width,d.height))));
+    canvas.style.width=(d.width*scale)+'px'; canvas.style.height=(d.height*scale)+'px';
+    status.className='status'; status.textContent=d.width+'×'+d.height+' / '+d.format;
+    return true;
+  }catch(e){status.className='status error';status.textContent=e.message;return false}
+}
+let timer; function schedule(){clearTimeout(timer);timer=setTimeout(render,120)}
+source.addEventListener('input',schedule); paletteText.addEventListener('input',schedule);
+document.querySelector('#render').addEventListener('click',render);
+document.querySelector('#save').addEventListener('click',()=>{
+  if(!render()) return;
+  const a=document.createElement('a'); a.download='pixel-art.png'; a.href=canvas.toDataURL('image/png'); a.click();
+});
+render();
+</script>
+</body></html>
