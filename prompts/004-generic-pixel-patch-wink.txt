@@ -1,0 +1,57 @@
+Edit the following existing 16x16 pixel-art sprite.
+
+User request:
+Make the slime wink by closing its left eye.
+
+Palette:
+0 = transparent
+1 = black
+2 = red
+3 = white
+
+Current bitmap:
+0000000000000000
+0000000000000000
+0000000000000000
+0000000000000000
+0000022222200000
+0000222222220000
+0002222222222000
+0022222222222200
+0022221221222200
+0002222222200000
+0000222222220000
+0000022222200000
+0000000000000000
+0000000000000000
+0000000000000000
+0000000000000000
+
+Coordinate system:
+- x = 0..15 from left to right.
+- y = 0..15 from top to bottom.
+- The current left eye is the black pixel at (6, 8).
+- The current right eye is the black pixel at (9, 8).
+
+Editing rules:
+- Decide how a closed/winking left eye should look in pixel art.
+- Change only pixels that are necessary for the requested edit.
+- Do not change the right eye.
+- Do not change unrelated parts of the slime.
+- Do not return the complete bitmap.
+- Return only the pixel changes required to transform the current bitmap.
+- Every change must specify x, y, and the new palette color.
+- Coordinates must stay inside the 16x16 canvas.
+- Use only colors 0, 1, 2, or 3.
+
+Output exactly this JSON structure and nothing else:
+
+{
+  "changes": [
+    { "x": 0, "y": 0, "color": 0 }
+  ]
+}
+
+Replace the example change with the actual changes.
+Do not output Markdown code fences.
+Do not output explanations.
