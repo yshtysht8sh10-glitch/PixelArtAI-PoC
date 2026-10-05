@@ -151,25 +151,26 @@ bmpFile.addEventListener('change',()=>{
         const key=paletteKey(data[i],data[i+1],data[i+2],data[i+3]);
         if(!colorToToken.has(key)){
           const index=colors.length;
-          if(index>=10) throw new Error('matrix-charは現在1文字パレットのため、BMPの色数は10色までです（検出: '+(index+1)+'色以上）');
-          const token=String(index);
-          colorToToken.set(key,token);
+          colorToToken.set(key,String(index));
           colors.push([data[i],data[i+1],data[i+2],data[i+3]]);
         }
       }
 
       paletteText.value=colors.map((rgba,i)=>i+' = '+rgba.join(',')).join('\n');
 
+      // matrix-char is convenient up to 10 colors. For larger palettes,
+      // switch automatically to matrix-csv so multi-digit palette IDs are lossless.
+      const useCsv=colors.length>10;
       const rows=[];
       for(let y=0;y<tmp.height;y++){
-        let row='';
+        const row=[];
         for(let x=0;x<tmp.width;x++){
           const i=(y*tmp.width+x)*4;
-          row+=colorToToken.get(paletteKey(data[i],data[i+1],data[i+2],data[i+3]));
+          row.push(colorToToken.get(paletteKey(data[i],data[i+1],data[i+2],data[i+3])));
         }
-        rows.push(row);
+        rows.push(useCsv?row.join(','):row.join(''));
       }
-      source.value='@format matrix-char\n'+rows.join('\n');
+      source.value='@format '+(useCsv?'matrix-csv':'matrix-char')+'\n'+rows.join('\n');
       render();
       status.textContent+=' / BMPパレットで上書き';
     }catch(e){status.className='status error';status.textContent=e.message}
