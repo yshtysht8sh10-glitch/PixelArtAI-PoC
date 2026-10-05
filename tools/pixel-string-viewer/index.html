@@ -130,6 +130,17 @@ const bmpFile=document.querySelector('#bmpFile');
 document.querySelector('#bmpLoad').addEventListener('click',()=>bmpFile.click());
 
 function paletteKey(r,g,b,a=255){return r+','+g+','+b+','+a}
+function rgbDistance(a,b){return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2])}
+function nearestPaletteToken(r,g,b,palette){
+  let best=null,bestD=Infinity;
+  for(const [token,rgba] of palette){
+    // Fully transparent palette entries are not candidates for opaque BMP pixels.
+    if(rgba[3]===0) continue;
+    const d=rgbDistance([r,g,b],rgba);
+    if(d<bestD){bestD=d;best=token}
+  }
+  return {token:best,distance:bestD};
+}
 function paletteReverse(){
   const p=parsePalette(paletteText.value), rev=new Map();
   for(const [token,rgba] of p) rev.set(paletteKey(...rgba),token);
@@ -142,7 +153,7 @@ bmpFile.addEventListener('change',()=>{
     try{
       const tmp=document.createElement('canvas'); tmp.width=img.naturalWidth; tmp.height=img.naturalHeight;
       const t=tmp.getContext('2d',{willReadFrequently:true}); t.drawImage(img,0,0);
-      const data=t.getImageData(0,0,tmp.width,tmp.height).data, rev=paletteReverse();
+      const data=t.getImageData(0,0,tmp.width,tmp.height).data, rev=paletteReverse(), pal=parsePalette(paletteText.value);
       const rows=[];
       for(let y=0;y<tmp.height;y++){
         let row='';
@@ -155,7 +166,12 @@ bmpFile.addEventListener('change',()=>{
             for(const [k,v] of parsePalette(paletteText.value)) if(v[0]===data[i]&&v[1]===data[i+1]&&v[2]===data[i+2]) matches.push(k);
             if(matches.length===1) token=matches[0];
           }
-          if(token===undefined) throw new Error('未定義色 RGB('+data[i]+','+data[i+1]+','+data[i+2]+') at ('+x+','+y+')');
+          if(token===undefined){
+            const nearest=nearestPaletteToken(data[i],data[i+1],data[i+2],pal);
+            // BMPs often contain anti-aliased/resampled colors. Map them to the nearest configured RGB.
+            if(nearest.token!==null) token=nearest.token;
+          }
+          if(token===undefined) throw new Error('変換できない色 RGB('+data[i]+','+data[i+1]+','+data[i+2]+') at ('+x+','+y+')');
           if([...token].length!==1) throw new Error('matrix-charではパレット番号は1文字である必要があります: '+token);
           row+=token;
         }
