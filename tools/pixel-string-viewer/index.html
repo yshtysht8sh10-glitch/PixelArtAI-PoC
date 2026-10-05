@@ -130,22 +130,14 @@ const bmpFile=document.querySelector('#bmpFile');
 document.querySelector('#bmpLoad').addEventListener('click',()=>bmpFile.click());
 
 function paletteKey(r,g,b,a=255){return r+','+g+','+b+','+a}
-function rgbDistance(a,b){return Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2])}
-function nearestPaletteToken(r,g,b,palette){
-  let best=null,bestD=Infinity;
-  for(const [token,rgba] of palette){
-    // Fully transparent palette entries are not candidates for opaque BMP pixels.
-    if(rgba[3]===0) continue;
-    const d=rgbDistance([r,g,b],rgba);
-    if(d<bestD){bestD=d;best=token}
-  }
-  return {token:best,distance:bestD};
-}
 function paletteReverse(){
   const p=parsePalette(paletteText.value), rev=new Map();
   for(const [token,rgba] of p) rev.set(paletteKey(...rgba),token);
   return rev;
 }
+const bmpFile=document.querySelector('#bmpFile');
+document.querySelector('#bmpLoad').addEventListener('click',()=>bmpFile.click());
+
 bmpFile.addEventListener('change',()=>{
   const file=bmpFile.files && bmpFile.files[0]; if(!file) return;
   const url=URL.createObjectURL(file), img=new Image();
@@ -153,33 +145,36 @@ bmpFile.addEventListener('change',()=>{
     try{
       const tmp=document.createElement('canvas'); tmp.width=img.naturalWidth; tmp.height=img.naturalHeight;
       const t=tmp.getContext('2d',{willReadFrequently:true}); t.drawImage(img,0,0);
-      const data=t.getImageData(0,0,tmp.width,tmp.height).data, rev=paletteReverse(), pal=parsePalette(paletteText.value);
+      const data=t.getImageData(0,0,tmp.width,tmp.height).data;
+
+      // Build a palette from the BMP itself, in first-appearance order.
+      // This intentionally replaces the current tool palette.
+      const colorToToken=new Map(), colors=[];
+      for(let i=0;i<data.length;i+=4){
+        const key=paletteKey(data[i],data[i+1],data[i+2],data[i+3]);
+        if(!colorToToken.has(key)){
+          const index=colors.length;
+          if(index>=10) throw new Error('matrix-charは現在1文字パレットのため、BMPの色数は10色までです（検出: '+(index+1)+'色以上）');
+          const token=String(index);
+          colorToToken.set(key,token);
+          colors.push([data[i],data[i+1],data[i+2],data[i+3]]);
+        }
+      }
+
+      paletteText.value=colors.map((rgba,i)=>i+' = '+rgba.join(',')).join('\n');
+
       const rows=[];
       for(let y=0;y<tmp.height;y++){
         let row='';
         for(let x=0;x<tmp.width;x++){
-          const i=(y*tmp.width+x)*4, key=paletteKey(data[i],data[i+1],data[i+2],data[i+3]);
-          let token=rev.get(key);
-          // BMP generally has no alpha; allow opaque RGB to match a palette entry whose RGB is identical.
-          if(token===undefined){
-            const matches=[];
-            for(const [k,v] of parsePalette(paletteText.value)) if(v[0]===data[i]&&v[1]===data[i+1]&&v[2]===data[i+2]) matches.push(k);
-            if(matches.length===1) token=matches[0];
-          }
-          if(token===undefined){
-            const nearest=nearestPaletteToken(data[i],data[i+1],data[i+2],pal);
-            // BMPs often contain anti-aliased/resampled colors. Map them to the nearest configured RGB.
-            if(nearest.token!==null) token=nearest.token;
-          }
-          if(token===undefined) throw new Error('変換できない色 RGB('+data[i]+','+data[i+1]+','+data[i+2]+') at ('+x+','+y+')');
-          if([...token].length!==1) throw new Error('matrix-charではパレット番号は1文字である必要があります: '+token);
-          row+=token;
+          const i=(y*tmp.width+x)*4;
+          row+=colorToToken.get(paletteKey(data[i],data[i+1],data[i+2],data[i+3]));
         }
         rows.push(row);
       }
       source.value='@format matrix-char\n'+rows.join('\n');
       render();
-      status.textContent+=' / BMP読込完了';
+      status.textContent+=' / BMPパレットで上書き';
     }catch(e){status.className='status error';status.textContent=e.message}
     finally{URL.revokeObjectURL(url);bmpFile.value=''}
   };
