@@ -20,7 +20,7 @@ button{border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:point
 .status{font-size:13px;color:#aeb5c2}.error{color:#ff8e8e}
 .help{font-size:13px;color:#aeb5c2;line-height:1.6;margin-top:10px}
 code{background:#0e1014;padding:2px 5px;border-radius:4px}
-.terminal{grid-column:1/-1}.terminal textarea{min-height:180px}.terminalLog{min-height:150px;max-height:300px;overflow:auto;white-space:pre-wrap;background:#0e1014;border:1px solid #3b404b;border-radius:8px;padding:12px;font:13px/1.45 Consolas,monospace}.terminalControls{display:grid;grid-template-columns:180px 1fr 150px auto;gap:10px}.terminalControls input{background:#0e1014;color:#eee;border:1px solid #3b404b;border-radius:8px;padding:10px;font:14px Consolas,monospace}@media(max-width:800px){.grid{grid-template-columns:1fr}.terminalControls{grid-template-columns:1fr}}
+.terminal{grid-column:1/-1}.terminal textarea{min-height:180px}.terminalLog{min-height:150px;max-height:300px;overflow:auto;white-space:pre-wrap;background:#0e1014;border:1px solid #3b404b;border-radius:8px;padding:12px;font:13px/1.45 Consolas,monospace}.terminalControls{display:grid;grid-template-columns:180px 1fr 150px auto auto 100px;gap:10px}.terminalControls input{background:#0e1014;color:#eee;border:1px solid #3b404b;border-radius:8px;padding:10px;font:14px Consolas,monospace}@media(max-width:800px){.grid{grid-template-columns:1fr}.terminalControls{grid-template-columns:1fr}}
 </style>
 </head>
 <body><main>
@@ -75,11 +75,13 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <input id="ollamaUrl" value="http://localhost:11434" aria-label="Ollama URL">
 <input id="ollamaContext" type="number" min="4096" step="4096" value="32768" aria-label="Context size">
 <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0"><input id="ollamaThink" type="checkbox" checked> Thinkingを表示</label>
+<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0"><input id="autoReview" type="checkbox" checked> Review/Retry</label>
+<input id="maxAttempts" type="number" min="1" max="5" value="3" aria-label="Max attempts">
 </div>
 <textarea id="aiPrompt" spellcheck="false" style="min-height:110px" placeholder="例: このドット絵の左目を自然にウインクさせて。"></textarea>
 <div class="row"><button class="primary" id="aiSend">Ollamaへ送信</button><button class="secondary" id="aiClear">ログ消去</button><span id="aiStatus" class="status">待機中</span></div>
 <div id="aiLog" class="terminalLog" aria-live="polite">Ollamaの応答をここに表示します。</div>
-<div class="help">現在のPixel文字列＋パレット＋PNGを自動でプロンプトへ添付します。Ollamaには <code>{"changes":[{"x":39,"y":13,"color":"10"}]}</code> 形式のPixel Patchだけを返させ、座標・パレットを検証して既存matrixへ差分適用します。</div>
+<div class="help">PNGからまず編集対象ROIを推定し、その局所matrixだけでPixel Patchを生成します。Patch適用後はVision Reviewを行い、NGなら理由を次の修正へフィードバックします（最大試行回数あり）。</div>
 </section>
 </div>
 </main>
@@ -251,70 +253,84 @@ function applyPatch(changes){
   render();
   return changed;
 }
+
+function canvasBase64(){
+  if(!render()) throw new Error('現在のPixel文字列を画像化できません');
+  const vision=document.createElement('canvas'), maxSide=Math.max(canvas.width,canvas.height);
+  const scale=Math.max(1,Math.min(8,Math.floor(512/maxSide)));
+  vision.width=canvas.width*scale; vision.height=canvas.height*scale;
+  const v=vision.getContext('2d'); v.imageSmoothingEnabled=false; v.drawImage(canvas,0,0,vision.width,vision.height);
+  return {base64:vision.toDataURL('image/png').split(',')[1],w:vision.width,h:vision.height};
+}
+function roiMatrix(roi){
+  const d=parseSource(source.value);
+  const x0=Math.max(0,roi.x), y0=Math.max(0,roi.y), x1=Math.min(d.width,x0+roi.width), y1=Math.min(d.height,y0+roi.height);
+  const lines=[];
+  for(let y=y0;y<y1;y++) lines.push('y='+y+': '+d.rows[y].slice(x0,x1).join(','));
+  return {x:x0,y:y0,width:x1-x0,height:y1-y0,text:lines.join('\n')};
+}
+async function ollamaJson(base,model,numCtx,think,messages,label){
+  const started=performance.now();
+  const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:true,think,format:'json',options:{num_ctx:numCtx},messages})});
+  if(!res.ok) throw new Error('Ollama HTTP '+res.status+': '+await res.text());
+  const reader=res.body.getReader(), decoder=new TextDecoder(); let buffer='',reply='',thinking='';
+  aiLog.textContent+='\n['+label+']\n';
+  while(true){
+    const r=await reader.read(); if(r.done) break; buffer+=decoder.decode(r.value,{stream:true});
+    const lines=buffer.split('\n'); buffer=lines.pop()||'';
+    for(const line of lines){if(!line.trim())continue;let data;try{data=JSON.parse(line)}catch{continue}
+      if(data.error)throw new Error(data.error);
+      const th=(data.message&&data.message.thinking)||''; if(th){thinking+=th;if(think){aiLog.textContent+=th;aiLog.scrollTop=aiLog.scrollHeight}}
+      const part=(data.message&&data.message.content)||''; if(part){reply+=part}
+      aiStatus.textContent=label+'… '+Math.round((performance.now()-started)/1000)+'秒 / 思考 '+thinking.length.toLocaleString()+'文字 / 回答 '+reply.length.toLocaleString()+'文字';
+      if(data.done) aiLog.textContent+='\n[done: prompt '+(data.prompt_eval_count||0).toLocaleString()+' / output '+(data.eval_count||0).toLocaleString()+' tokens / '+Math.round((performance.now()-started)/1000)+' sec]\n';
+    }
+  }
+  if(!reply.trim()) throw new Error(label+'から本文が返りませんでした');
+  aiLog.textContent+='[Answer] '+reply+'\n';
+  try{return JSON.parse(reply)}catch(e){throw new Error(label+' JSON解析失敗: '+e.message)}
+}
+function validateRoi(obj,d){
+  const r=obj&&obj.roi;if(!r)throw new Error('ROIがありません');
+  const x=Math.max(0,Math.min(d.width-1,Math.floor(Number(r.x)))),y=Math.max(0,Math.min(d.height-1,Math.floor(Number(r.y))));
+  const width=Math.max(1,Math.min(d.width-x,Math.floor(Number(r.width)||1))),height=Math.max(1,Math.min(d.height-y,Math.floor(Number(r.height)||1)));
+  return {x,y,width,height};
+}
 document.querySelector('#aiClear').addEventListener('click',()=>{aiLog.textContent='';aiStatus.textContent='待機中'});
 document.querySelector('#aiSend').addEventListener('click',async()=>{
   const btn=document.querySelector('#aiSend');
   try{
     const instruction=aiPrompt.value.trim(); if(!instruction) throw new Error('指示を入力してください');
     const base=document.querySelector('#ollamaUrl').value.trim().replace(/\/$/,'');
-    const model=document.querySelector('#ollamaModel').value.trim(); if(!model) throw new Error('モデル名を入力してください');
-    const numCtx=Math.max(4096,Number(document.querySelector('#ollamaContext').value)||32768);
-    const useThinking=document.querySelector('#ollamaThink').checked;
-    const srcLines=source.value.replace(/\r/g,'').split('\n'), header=srcLines.shift();
-    const bundle=[header,'@palette',paletteText.value.trim(),'@endpalette',...srcLines].join('\n');
-    const system='You edit pixel art. You receive a rendered PNG preview plus the exact pixel matrix and palette. Use the PNG to understand the subject and requested visual change, and the matrix/palette to choose exact coordinates and existing palette IDs. Return ONLY one compact JSON object in this exact shape: {"changes":[{"x":0,"y":0,"color":"1"}]}. Coordinates are zero-based from the top-left. Include only pixels that must change. Do not return the full matrix, markdown, prose, row dumps, or colors outside the supplied palette. Prefer the smallest local edit that clearly satisfies the instruction.';
-    const user=instruction+'\n\nCURRENT PIXEL ART MATRIX AND PALETTE:\n'+bundle;
-    // Ollama vision messages accept images as base64 strings without the data URL prefix.
-    // Scale up with nearest-neighbor so tiny pixel art is easier for a VLM to inspect.
-    if(!render()) throw new Error('現在のPixel文字列を画像化できません');
-    const vision=document.createElement('canvas');
-    const maxSide=Math.max(canvas.width,canvas.height);
-    const visionScale=Math.max(1,Math.min(8,Math.floor(512/maxSide)));
-    vision.width=canvas.width*visionScale; vision.height=canvas.height*visionScale;
-    const vctx=vision.getContext('2d'); vctx.imageSmoothingEnabled=false;
-    vctx.drawImage(canvas,0,0,vision.width,vision.height);
-    const imageBase64=vision.toDataURL('image/png').split(',')[1];
-    btn.disabled=true; aiStatus.className='status'; aiStatus.textContent='Ollamaに問い合わせ中…';
-    aiLog.textContent='> '+instruction+'\n[PNG preview attached: '+canvas.width+'×'+canvas.height+' → '+vision.width+'×'+vision.height+']\n[Context: '+numCtx.toLocaleString()+' tokens]\n[Thinking: '+(useThinking?'ON':'OFF')+']\n\n';
-    const started=performance.now();
-    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:true,think:useThinking,options:{num_ctx:numCtx},messages:[{role:'system',content:system},{role:'user',content:user,images:[imageBase64]}]})});
-    if(!res.ok) throw new Error('Ollama HTTP '+res.status+': '+await res.text());
-    if(!res.body) throw new Error('Ollamaのストリーム応答を取得できません');
-    const reader=res.body.getReader(), decoder=new TextDecoder();
-    let buffer='', reply='', thinking='', chunks=0, lastStatus=0;
-    aiLog.textContent+='[Ollama '+model+' / streaming]\n';
-    while(true){
-      const {value,done}=await reader.read(); if(done) break;
-      buffer+=decoder.decode(value,{stream:true});
-      const lines=buffer.split('\n'); buffer=lines.pop()||'';
-      for(const line of lines){
-        if(!line.trim()) continue;
-        let data; try{data=JSON.parse(line)}catch{continue}
-        if(data.error) throw new Error('Ollama: '+data.error);
-        const thought=(data.message&&data.message.thinking)||data.thinking||'';
-        if(thought){if(!thinking) aiLog.textContent+='[Thinking]\n';thinking+=thought;aiLog.textContent+=thought;aiLog.scrollTop=aiLog.scrollHeight}
-        const part=(data.message&&data.message.content)||data.response||'';
-        if(part){if(!reply) aiLog.textContent+='\n[Answer]\n';reply+=part;aiLog.textContent+=part;aiLog.scrollTop=aiLog.scrollHeight;chunks++}
-        const now=performance.now();
-        if(now-lastStatus>500){
-          aiStatus.textContent=(reply?'回答生成中… ':'思考中… ')+Math.round((now-started)/1000)+'秒 / 思考 '+thinking.length.toLocaleString()+'文字 / 回答 '+reply.length.toLocaleString()+'文字';
-          lastStatus=now;
-        }
-        if(data.done){
-          const evalCount=data.eval_count||0, promptCount=data.prompt_eval_count||0;
-          aiLog.textContent+='\n\n[done: prompt '+promptCount.toLocaleString()+' tokens / output '+evalCount.toLocaleString()+' tokens / '+Math.round((performance.now()-started)/1000)+' sec]\n';
-        }
-      }
+    const model=document.querySelector('#ollamaModel').value.trim(); const numCtx=Math.max(4096,Number(document.querySelector('#ollamaContext').value)||32768);
+    const think=document.querySelector('#ollamaThink').checked, review=document.querySelector('#autoReview').checked, maxAttempts=Math.max(1,Math.min(5,Number(document.querySelector('#maxAttempts').value)||3));
+    btn.disabled=true; aiLog.textContent='> '+instruction+'\n'; aiStatus.className='status';
+    const original=canvasBase64(), d=parseSource(source.value);
+    aiLog.textContent+='[PNG '+canvas.width+'×'+canvas.height+' → '+original.w+'×'+original.h+']\n';
+    const roiObj=await ollamaJson(base,model,numCtx,false,[{role:'system',content:'Locate the smallest rectangular pixel-art region relevant to the requested edit. Return JSON only: {"roi":{"x":0,"y":0,"width":1,"height":1},"reason":"short"}. Coordinates refer to the ORIGINAL '+d.width+'x'+d.height+' pixel grid, zero-based.'},{role:'user',content:instruction,images:[original.base64]}],'ROI');
+    let roi=validateRoi(roiObj,d);
+    // add a small generic margin so the editor sees local visual context
+    const margin=4; roi={x:Math.max(0,roi.x-margin),y:Math.max(0,roi.y-margin),width:Math.min(d.width-Math.max(0,roi.x-margin),roi.width+margin*2),height:Math.min(d.height-Math.max(0,roi.y-margin),roi.height+margin*2)};
+    aiLog.textContent+='[ROI x='+roi.x+', y='+roi.y+', '+roi.width+'×'+roi.height+']\n';
+    let feedback='',success=false;
+    for(let attempt=1;attempt<=maxAttempts;attempt++){
+      const local=roiMatrix(roi), before=canvasBase64();
+      const editSystem='Edit pixel art using ONLY a generic Pixel Patch. Return JSON only: {"changes":[{"x":0,"y":0,"color":"1"}]}. Coordinates are absolute zero-based coordinates in the original image. Use only supplied palette IDs. Make the smallest local edit that clearly satisfies the instruction. Never return the full matrix.';
+      const editUser=instruction+'\nROI: x='+local.x+', y='+local.y+', width='+local.width+', height='+local.height+'\nPALETTE:\n'+paletteText.value.trim()+'\nLOCAL MATRIX:\n'+local.text+(feedback?'\nPREVIOUS REVIEW:\n'+feedback:'');
+      const patch=await ollamaJson(base,model,numCtx,think,[{role:'system',content:editSystem},{role:'user',content:editUser,images:[before.base64]}],'Edit '+attempt+'/'+maxAttempts);
+      const changes=extractPatch(JSON.stringify(patch)), changed=applyPatch(changes);
+      aiLog.textContent+='[Patch applied: '+changed+' changed / '+changes.length+' requested]\n';
+      if(!review){success=true;break}
+      const after=canvasBase64();
+      const reviewObj=await ollamaJson(base,model,8192,false,[{role:'system',content:'Judge whether the edited pixel-art image visibly and naturally satisfies the user instruction. Be strict. Return JSON only: {"success":true,"reason":"short visual reason","suggestion":"what to fix if false"}.'},{role:'user',content:instruction+'\nJudge the CURRENT edited image.',images:[after.base64]}],'Review '+attempt+'/'+maxAttempts);
+      aiLog.textContent+='[Review: '+(reviewObj.success?'PASS':'FAIL')+' - '+(reviewObj.reason||'')+']\n';
+      if(reviewObj.success===true){success=true;break}
+      feedback=(reviewObj.reason||'')+' '+(reviewObj.suggestion||'');
     }
-    if(!reply.trim()) throw new Error('Ollamaから本文が返りませんでした');
-    const changes=extractPatch(reply);
-    const changed=applyPatch(changes);
-    aiLog.textContent+='\n[Patch applied: '+changed+' changed / '+changes.length+' requested]\n';
-    aiStatus.className='status'; aiStatus.textContent='Pixel Patchを検証し '+changed+' pixel反映しました';
-  }catch(e){
-    aiStatus.className='status error'; aiStatus.textContent=e.message;
-    aiLog.textContent+='\n[ERROR] '+e.message+'\n※ file:// からOllamaへ接続できない場合は Ollama の CORS 設定またはローカルHTTP配信が必要です。';
-  }finally{btn.disabled=false}
+    aiStatus.className=success?'status':'status error';
+    aiStatus.textContent=success?'編集＋Review完了':'最大試行回数までReview NG';
+  }catch(e){aiStatus.className='status error';aiStatus.textContent=e.message;aiLog.textContent+='\n[ERROR] '+e.message}
+  finally{btn.disabled=false}
 });
 document.querySelector('#save').addEventListener('click',()=>{
   if(!render()) return;
