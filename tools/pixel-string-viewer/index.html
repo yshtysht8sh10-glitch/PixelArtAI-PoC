@@ -20,7 +20,7 @@ button{border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:point
 .status{font-size:13px;color:#aeb5c2}.error{color:#ff8e8e}
 .help{font-size:13px;color:#aeb5c2;line-height:1.6;margin-top:10px}
 code{background:#0e1014;padding:2px 5px;border-radius:4px}
-@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.terminal{grid-column:1/-1}.terminal textarea{min-height:180px}.terminalLog{min-height:150px;max-height:300px;overflow:auto;white-space:pre-wrap;background:#0e1014;border:1px solid #3b404b;border-radius:8px;padding:12px;font:13px/1.45 Consolas,monospace}.terminalControls{display:grid;grid-template-columns:180px 1fr;gap:10px}.terminalControls input{background:#0e1014;color:#eee;border:1px solid #3b404b;border-radius:8px;padding:10px;font:14px Consolas,monospace}@media(max-width:800px){.grid{grid-template-columns:1fr}.terminalControls{grid-template-columns:1fr}}
 </style>
 </head>
 <body><main>
@@ -67,6 +67,17 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <label>操作</label>
 <div class="row"><button class="secondary" id="render">再描画</button></div>
 <div class="help">入力またはパレットを編集すると自動で再描画します。保存されるPNGは元のpixelサイズです（例: 16×16）。プレビューだけ拡大表示します。</div>
+</section>
+<section class="card terminal">
+<label for="aiPrompt">Ollama 実験ターミナル</label>
+<div class="terminalControls">
+<input id="ollamaModel" value="qwen3-vl:8b" aria-label="Ollama model">
+<input id="ollamaUrl" value="http://localhost:11434" aria-label="Ollama URL">
+</div>
+<textarea id="aiPrompt" spellcheck="false" style="min-height:110px" placeholder="例: このドット絵の左目を自然にウインクさせて。"></textarea>
+<div class="row"><button class="primary" id="aiSend">Ollamaへ送信</button><button class="secondary" id="aiClear">ログ消去</button><span id="aiStatus" class="status">待機中</span></div>
+<div id="aiLog" class="terminalLog" aria-live="polite">Ollamaの応答をここに表示します。</div>
+<div class="help">現在のPixel文字列＋パレットを自動でプロンプトへ添付します。応答に <code>@format matrix-char</code> または <code>@format matrix-csv</code> の完全なmatrixが含まれていれば、検証後にPixel文字列へ自動反映します。パレットは変更しません。</div>
 </section>
 </div>
 </main>
@@ -207,6 +218,48 @@ bmpFile.addEventListener('change',()=>{
   };
   img.onerror=()=>{URL.revokeObjectURL(url);bmpFile.value='';status.className='status error';status.textContent='BMPを読み込めませんでした'};
   img.src=url;
+});
+
+const aiPrompt=document.querySelector('#aiPrompt'), aiLog=document.querySelector('#aiLog'), aiStatus=document.querySelector('#aiStatus');
+function extractMatrix(text){
+  const normalized=text.replace(/\r/g,'');
+  const match=normalized.match(/@format\s+(matrix-(?:char|csv))\s*\n([\s\S]*)/);
+  if(!match) throw new Error('応答に @format matrix-char / matrix-csv がありません');
+  const format=match[1];
+  let body=match[2].trim();
+  body=body.replace(/\n\`\`\`[\s\S]*$/,'').trim();
+  const candidate='@format '+format+'\n'+body;
+  const d=parseSource(candidate), p=parsePalette(paletteText.value);
+  for(const row of d.rows) for(const token of row) if(!p.has(token)) throw new Error('AI応答に未定義パレット番号: '+token);
+  const current=parseSource(source.value);
+  if(d.width!==current.width || d.height!==current.height) throw new Error('AI応答サイズ不一致: '+d.width+'×'+d.height+' (現在 '+current.width+'×'+current.height+')');
+  return candidate;
+}
+document.querySelector('#aiClear').addEventListener('click',()=>{aiLog.textContent='';aiStatus.textContent='待機中'});
+document.querySelector('#aiSend').addEventListener('click',async()=>{
+  const btn=document.querySelector('#aiSend');
+  try{
+    const instruction=aiPrompt.value.trim(); if(!instruction) throw new Error('指示を入力してください');
+    const base=document.querySelector('#ollamaUrl').value.trim().replace(/\/$/,'');
+    const model=document.querySelector('#ollamaModel').value.trim(); if(!model) throw new Error('モデル名を入力してください');
+    const srcLines=source.value.replace(/\r/g,'').split('\n'), header=srcLines.shift();
+    const bundle=[header,'@palette',paletteText.value.trim(),'@endpalette',...srcLines].join('\n');
+    const system='You edit pixel art. Return ONLY the complete edited pixel matrix. First line must be the same @format line as input. Then output every matrix row. Do not output palette, markdown fences, explanation, JSON, or coordinates. Preserve width, height, and palette IDs. Make only changes needed for the instruction.';
+    const user=instruction+'\n\nCURRENT PIXEL ART:\n'+bundle;
+    btn.disabled=true; aiStatus.className='status'; aiStatus.textContent='Ollamaに問い合わせ中…';
+    aiLog.textContent='> '+instruction+'\n\n';
+    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:false,think:false,messages:[{role:'system',content:system},{role:'user',content:user}]})});
+    if(!res.ok) throw new Error('Ollama HTTP '+res.status+': '+await res.text());
+    const data=await res.json();
+    const reply=(data.message&&data.message.content)||data.response||'';
+    aiLog.textContent+='[Ollama '+model+']\n'+reply;
+    const candidate=extractMatrix(reply);
+    source.value=candidate; render();
+    aiStatus.className='status'; aiStatus.textContent='応答を検証しPixel文字列へ反映しました';
+  }catch(e){
+    aiStatus.className='status error'; aiStatus.textContent=e.message;
+    aiLog.textContent+='\n[ERROR] '+e.message+'\n※ file:// からOllamaへ接続できない場合は Ollama の CORS 設定またはローカルHTTP配信が必要です。';
+  }finally{btn.disabled=false}
 });
 document.querySelector('#save').addEventListener('click',()=>{
   if(!render()) return;
