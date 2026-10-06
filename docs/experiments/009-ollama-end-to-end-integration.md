@@ -245,3 +245,78 @@ For the same wink task, record:
 - human visual judgment.
 
 This will test whether reducing input context and adding closed-loop visual verification improves both latency and quality.
+
+
+## First ROI + Review/Retry run
+
+A real run with the 85 × 83 sprite used the instruction to wink the character's right eye.
+
+The ROI locator returned:
+
+```json
+{"roi":{"x":40,"y":20,"width":3,"height":3},"reason":"short"}
+```
+
+The application added its generic margin and produced an 11 × 11 edit region:
+
+```text
+x=36, y=16, width=11, height=11
+```
+
+ROI localization metrics:
+
+| Metric | Result |
+| --- | ---: |
+| Prompt tokens | 1,147 |
+| Output tokens | 5,148 |
+| Elapsed time | 117,459 ms (~117 sec) |
+| Raw ROI | 3 × 3 |
+| Expanded edit ROI | 11 × 11 |
+
+This confirms that ROI-first editing drastically reduces the matrix region passed to the edit stage. However, the edit reasoning still became very long. Within the small 11 × 11 region, the model repeatedly reconsidered which coordinate represented the requested eye, including candidates around `(37,19)` and later `(45,17)`.
+
+### New finding: visual-to-coordinate mapping
+
+The bottleneck is no longer simply the size of the full 7,055-pixel matrix. The experiment exposed a more specific weakness:
+
+```text
+visual understanding
+       ↓
+ROI localization
+       ↓
+semantic feature in ROI
+       ↓
+exact matrix coordinate  ← unstable
+       ↓
+Pixel Patch
+```
+
+The model can identify a plausible visual region, but mapping the visible semantic feature to an exact matrix coordinate is unstable. Long Thinking does not necessarily improve this mapping and can cause the candidate coordinate to drift during reasoning.
+
+## Experiment 010: Coordinate-aware ROI + Thinking OFF
+
+The next Viewer revision changes the edit stage in two ways.
+
+1. The 11 × 11 ROI is rendered as a dedicated magnified image with absolute x-coordinate labels across the top and absolute y-coordinate labels down the left.
+2. Edit Thinking defaults to OFF.
+
+The edit model now receives:
+
+- the natural-language instruction,
+- the coordinate-labeled ROI image,
+- the exact local matrix,
+- the palette,
+- Review feedback when retrying.
+
+The application remains semantics-free. It does not know what an eye, wink, face, or character is; it only supplies a deterministic mapping between image pixels and matrix coordinates.
+
+The hypothesis is that explicit coordinate grounding will reduce visual-to-matrix ambiguity, while disabling long edit Thinking will reduce latency and prevent unnecessary coordinate drift.
+
+Metrics to compare with the previous run:
+
+- Edit elapsed time,
+- Edit output tokens,
+- selected patch coordinates,
+- Review PASS/FAIL,
+- number of retry attempts,
+- human visual judgment.
