@@ -79,7 +79,7 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <textarea id="aiPrompt" spellcheck="false" style="min-height:110px" placeholder="例: このドット絵の左目を自然にウインクさせて。"></textarea>
 <div class="row"><button class="primary" id="aiSend">Ollamaへ送信</button><button class="secondary" id="aiClear">ログ消去</button><span id="aiStatus" class="status">待機中</span></div>
 <div id="aiLog" class="terminalLog" aria-live="polite">Ollamaの応答をここに表示します。</div>
-<div class="help">現在のPixel文字列＋パレットを自動でプロンプトへ添付します。応答に <code>@format matrix-char</code> または <code>@format matrix-csv</code> の完全なmatrixが含まれていれば、検証後にPixel文字列へ自動反映します。パレットは変更しません。</div>
+<div class="help">現在のPixel文字列＋パレット＋PNGを自動でプロンプトへ添付します。Ollamaには <code>{"changes":[{"x":39,"y":13,"color":"10"}]}</code> 形式のPixel Patchだけを返させ、座標・パレットを検証して既存matrixへ差分適用します。</div>
 </section>
 </div>
 </main>
@@ -223,19 +223,33 @@ bmpFile.addEventListener('change',()=>{
 });
 
 const aiPrompt=document.querySelector('#aiPrompt'), aiLog=document.querySelector('#aiLog'), aiStatus=document.querySelector('#aiStatus');
-function extractMatrix(text){
-  const normalized=text.replace(/\r/g,'');
-  const match=normalized.match(/@format\s+(matrix-(?:char|csv))\s*\n([\s\S]*)/);
-  if(!match) throw new Error('応答に @format matrix-char / matrix-csv がありません');
-  const format=match[1];
-  let body=match[2].trim();
-  body=body.replace(/\n\`\`\`[\s\S]*$/,'').trim();
-  const candidate='@format '+format+'\n'+body;
-  const d=parseSource(candidate), p=parsePalette(paletteText.value);
-  for(const row of d.rows) for(const token of row) if(!p.has(token)) throw new Error('AI応答に未定義パレット番号: '+token);
-  const current=parseSource(source.value);
-  if(d.width!==current.width || d.height!==current.height) throw new Error('AI応答サイズ不一致: '+d.width+'×'+d.height+' (現在 '+current.width+'×'+current.height+')');
-  return candidate;
+function extractPatch(text){
+  let cleaned=text.trim().replace(/^\`\`\`(?:json)?\s*/i,'').replace(/\s*\`\`\`$/,'');
+  const start=cleaned.indexOf('{'), end=cleaned.lastIndexOf('}');
+  if(start<0||end<start) throw new Error('応答にPixel Patch JSONがありません');
+  let patch; try{patch=JSON.parse(cleaned.slice(start,end+1))}catch(e){throw new Error('Pixel Patch JSONを解析できません: '+e.message)}
+  if(!patch||!Array.isArray(patch.changes)) throw new Error('Pixel Patchは changes 配列が必要です');
+  if(patch.changes.length>500) throw new Error('変更pixel数が多すぎます: '+patch.changes.length);
+  const d=parseSource(source.value), p=parsePalette(paletteText.value), seen=new Set();
+  const changes=patch.changes.map((ch,i)=>{
+    const x=Number(ch.x), y=Number(ch.y), color=String(ch.color);
+    if(!Number.isInteger(x)||!Number.isInteger(y)) throw new Error('changes['+i+'] の座標が整数ではありません');
+    if(x<0||x>=d.width||y<0||y>=d.height) throw new Error('changes['+i+'] が範囲外です: ('+x+','+y+')');
+    if(!p.has(color)) throw new Error('changes['+i+'] の未定義パレット番号: '+color);
+    const key=x+','+y; if(seen.has(key)) throw new Error('同じ座標が重複しています: ('+x+','+y+')'); seen.add(key);
+    return {x,y,color};
+  });
+  return changes;
+}
+function applyPatch(changes){
+  const d=parseSource(source.value);
+  const rows=d.rows.map(r=>r.slice());
+  let changed=0;
+  for(const ch of changes){if(rows[ch.y][ch.x]!==ch.color){rows[ch.y][ch.x]=ch.color;changed++}}
+  const body=rows.map(r=>d.format==='matrix-csv'?r.join(','):r.join('')).join('\n');
+  source.value='@format '+d.format+'\n'+body;
+  render();
+  return changed;
 }
 document.querySelector('#aiClear').addEventListener('click',()=>{aiLog.textContent='';aiStatus.textContent='待機中'});
 document.querySelector('#aiSend').addEventListener('click',async()=>{
@@ -248,7 +262,7 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     const useThinking=document.querySelector('#ollamaThink').checked;
     const srcLines=source.value.replace(/\r/g,'').split('\n'), header=srcLines.shift();
     const bundle=[header,'@palette',paletteText.value.trim(),'@endpalette',...srcLines].join('\n');
-    const system='You edit pixel art. You receive both a rendered PNG preview and the exact pixel matrix/palette. Use the image to understand the subject, pose, facial features, and requested visual change. Use the matrix and palette for exact pixel-level editing. Return ONLY the complete edited pixel matrix. First line must be the same @format line as input. Then output every matrix row. Do not output palette, markdown fences, explanation, JSON, or coordinates. Preserve width, height, and palette IDs. Make only changes needed for the instruction.';
+    const system='You edit pixel art. You receive a rendered PNG preview plus the exact pixel matrix and palette. Use the PNG to understand the subject and requested visual change, and the matrix/palette to choose exact coordinates and existing palette IDs. Return ONLY one compact JSON object in this exact shape: {"changes":[{"x":0,"y":0,"color":"1"}]}. Coordinates are zero-based from the top-left. Include only pixels that must change. Do not return the full matrix, markdown, prose, row dumps, or colors outside the supplied palette. Prefer the smallest local edit that clearly satisfies the instruction.';
     const user=instruction+'\n\nCURRENT PIXEL ART MATRIX AND PALETTE:\n'+bundle;
     // Ollama vision messages accept images as base64 strings without the data URL prefix.
     // Scale up with nearest-neighbor so tiny pixel art is easier for a VLM to inspect.
@@ -293,9 +307,10 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
       }
     }
     if(!reply.trim()) throw new Error('Ollamaから本文が返りませんでした');
-    const candidate=extractMatrix(reply);
-    source.value=candidate; render();
-    aiStatus.className='status'; aiStatus.textContent='応答を検証しPixel文字列へ反映しました';
+    const changes=extractPatch(reply);
+    const changed=applyPatch(changes);
+    aiLog.textContent+='\n[Patch applied: '+changed+' changed / '+changes.length+' requested]\n';
+    aiStatus.className='status'; aiStatus.textContent='Pixel Patchを検証し '+changed+' pixel反映しました';
   }catch(e){
     aiStatus.className='status error'; aiStatus.textContent=e.message;
     aiLog.textContent+='\n[ERROR] '+e.message+'\n※ file:// からOllamaへ接続できない場合は Ollama の CORS 設定またはローカルHTTP配信が必要です。';
