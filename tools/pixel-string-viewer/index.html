@@ -260,11 +260,35 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     const imageBase64=vision.toDataURL('image/png').split(',')[1];
     btn.disabled=true; aiStatus.className='status'; aiStatus.textContent='Ollamaに問い合わせ中…';
     aiLog.textContent='> '+instruction+'\n[PNG preview attached: '+canvas.width+'×'+canvas.height+' → '+vision.width+'×'+vision.height+']\n[Context: '+numCtx.toLocaleString()+' tokens]\n\n';
-    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:false,think:false,options:{num_ctx:numCtx},messages:[{role:'system',content:system},{role:'user',content:user,images:[imageBase64]}]})});
+    const started=performance.now();
+    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:true,think:false,options:{num_ctx:numCtx},messages:[{role:'system',content:system},{role:'user',content:user,images:[imageBase64]}]})});
     if(!res.ok) throw new Error('Ollama HTTP '+res.status+': '+await res.text());
-    const data=await res.json();
-    const reply=(data.message&&data.message.content)||data.response||'';
-    aiLog.textContent+='[Ollama '+model+']\n'+reply;
+    if(!res.body) throw new Error('Ollamaのストリーム応答を取得できません');
+    const reader=res.body.getReader(), decoder=new TextDecoder();
+    let buffer='', reply='', chunks=0, lastStatus=0;
+    aiLog.textContent+='[Ollama '+model+' / streaming]\n';
+    while(true){
+      const {value,done}=await reader.read(); if(done) break;
+      buffer+=decoder.decode(value,{stream:true});
+      const lines=buffer.split('\n'); buffer=lines.pop()||'';
+      for(const line of lines){
+        if(!line.trim()) continue;
+        let data; try{data=JSON.parse(line)}catch{continue}
+        if(data.error) throw new Error('Ollama: '+data.error);
+        const part=(data.message&&data.message.content)||data.response||'';
+        if(part){reply+=part;aiLog.textContent+=part;aiLog.scrollTop=aiLog.scrollHeight;chunks++}
+        const now=performance.now();
+        if(now-lastStatus>500){
+          aiStatus.textContent='生成中… '+Math.round((now-started)/1000)+'秒 / '+reply.length.toLocaleString()+'文字';
+          lastStatus=now;
+        }
+        if(data.done){
+          const evalCount=data.eval_count||0, promptCount=data.prompt_eval_count||0;
+          aiLog.textContent+='\n\n[done: prompt '+promptCount.toLocaleString()+' tokens / output '+evalCount.toLocaleString()+' tokens / '+Math.round((performance.now()-started)/1000)+' sec]\n';
+        }
+      }
+    }
+    if(!reply.trim()) throw new Error('Ollamaから本文が返りませんでした');
     const candidate=extractMatrix(reply);
     source.value=candidate; render();
     aiStatus.className='status'; aiStatus.textContent='応答を検証しPixel文字列へ反映しました';
