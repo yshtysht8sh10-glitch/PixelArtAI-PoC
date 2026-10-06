@@ -247,14 +247,25 @@ function extractPatch(text){
   return changes;
 }
 function applyPatch(changes){
-  const d=parseSource(source.value);
-  const rows=d.rows.map(r=>r.slice());
-  let changed=0;
-  for(const ch of changes){if(rows[ch.y][ch.x]!==ch.color){rows[ch.y][ch.x]=ch.color;changed++}}
+  const d=parseSource(source.value), rows=d.rows.map(r=>r.slice()), diffs=[];
+  for(const ch of changes){
+    const before=rows[ch.y][ch.x];
+    if(before!==ch.color){diffs.push({x:ch.x,y:ch.y,before,after:ch.color});rows[ch.y][ch.x]=ch.color}
+  }
   const body=rows.map(r=>d.format==='matrix-csv'?r.join(','):r.join('')).join('\n');
-  source.value='@format '+d.format+'\n'+body;
-  render();
-  return changed;
+  source.value='@format '+d.format+'\n'+body; render();
+  return diffs;
+}
+function diffMatrices(originalText,currentText){
+  const a=parseSource(originalText),b=parseSource(currentText),diffs=[];
+  if(a.width!==b.width||a.height!==b.height)return diffs;
+  for(let y=0;y<a.height;y++)for(let x=0;x<a.width;x++)if(a.rows[y][x]!==b.rows[y][x])diffs.push({x,y,before:a.rows[y][x],after:b.rows[y][x]});
+  return diffs;
+}
+function appendPixelDiff(title,diffs){
+  aiLog.textContent+='\n['+title+']\n';
+  if(!diffs.length){aiLog.textContent+='(no effective pixel changes)\n';return}
+  for(const d of diffs)aiLog.textContent+='('+d.x+','+d.y+') '+d.before+' -> '+d.after+'\n';
 }
 
 function canvasBase64(){
@@ -310,7 +321,7 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     const base=document.querySelector('#ollamaUrl').value.trim().replace(/\/$/,'');
     const model=document.querySelector('#ollamaModel').value.trim(); const numCtx=Math.max(4096,Number(document.querySelector('#ollamaContext').value)||32768);
     const think=document.querySelector('#ollamaThink').checked, review=document.querySelector('#autoReview').checked, maxAttempts=Math.max(1,Math.min(5,Number(document.querySelector('#maxAttempts').value)||3));
-    btn.disabled=true; experimentMetrics=[]; const experimentStarted=performance.now();
+    btn.disabled=true; experimentMetrics=[]; const experimentStarted=performance.now(), originalSource=source.value;
     aiLog.textContent='=== PixelArtAI Experiment Log ===\nTimestamp: '+new Date().toISOString()+'\nModel: '+model+'\nContext: '+numCtx+'\nThinking: '+think+'\nReview/Retry: '+review+'\nMaxAttempts: '+maxAttempts+'\nInstruction: '+instruction+'\n\n'; aiStatus.className='status';
     const original=canvasBase64(), d=parseSource(source.value);
     aiLog.textContent+='[PNG '+canvas.width+'×'+canvas.height+' → '+original.w+'×'+original.h+']\n';
@@ -326,8 +337,9 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
       const editSystem='Edit pixel art using ONLY a generic Pixel Patch. Return JSON only: {"changes":[{"x":0,"y":0,"color":"1"}]}. Coordinates are absolute zero-based coordinates in the original image. Use only supplied palette IDs. Make the smallest local edit that clearly satisfies the instruction. Never return the full matrix.';
       const editUser=instruction+'\nROI: x='+local.x+', y='+local.y+', width='+local.width+', height='+local.height+'\nPALETTE:\n'+paletteText.value.trim()+'\nLOCAL MATRIX:\n'+local.text+(feedback?'\nPREVIOUS REVIEW:\n'+feedback:'');
       const patch=await ollamaJson(base,model,numCtx,think,[{role:'system',content:editSystem},{role:'user',content:editUser,images:[before.base64]}],'Edit '+attempt+'/'+maxAttempts,'edit',attempt);
-      const changes=extractPatch(JSON.stringify(patch)), changed=applyPatch(changes);
+      const changes=extractPatch(JSON.stringify(patch)), diffs=applyPatch(changes), changed=diffs.length;
       aiLog.textContent+='[Patch applied: '+changed+' changed / '+changes.length+' requested]\n';
+      appendPixelDiff('PIXEL CHANGE attempt='+attempt,diffs);
       experimentMetrics[experimentMetrics.length-1].extra='patch_requested='+changes.length+' patch_changed='+changed;
       if(!review){success=true;break}
       const after=canvasBase64();
@@ -339,6 +351,8 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     }
     aiStatus.className=success?'status':'status error';
     const totalMs=Math.round(performance.now()-experimentStarted);
+    const finalDiffs=diffMatrices(originalSource,source.value);
+    appendPixelDiff('FINAL PIXEL DIFF total='+finalDiffs.length,finalDiffs);
     aiLog.textContent+='\n=== SUMMARY ===\nTotal: '+totalMs+' ms ('+(totalMs/1000).toFixed(1)+' sec)\n'+experimentMetrics.map(metricLine).join('\n')+'\nFinal: '+(success?'PASS':'FAIL')+'\n';
     aiStatus.textContent=success?'編集＋Review完了':'最大試行回数までReview NG';
   }catch(e){aiStatus.className='status error';aiStatus.textContent=e.message;aiLog.textContent+='\n[ERROR] '+e.message}
