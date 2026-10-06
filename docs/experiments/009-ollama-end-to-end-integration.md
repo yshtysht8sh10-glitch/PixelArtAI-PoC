@@ -150,3 +150,98 @@ Run the same 85 × 83 sprite and the same wink instruction with Pixel Patch outp
 - visual quality.
 
 The full-matrix run above is the baseline.
+
+
+## Pixel Patch run result
+
+The same 85 × 83 sprite was tested with the Generic Pixel Patch output contract.
+
+| Metric | Full matrix | Pixel Patch |
+| --- | ---: | ---: |
+| Prompt tokens | 16,819 | 16,833 |
+| Output tokens | 15,949 | 10,120 |
+| Elapsed time | 821 sec | 458 sec |
+| Final structured answer | none | yes |
+| Patch applied | no | yes, 1 pixel |
+| Visual result | n/a | no visible wink |
+
+The model returned:
+
+```json
+{"changes":[{"x":50,"y":10,"color":"7"}]}
+```
+
+The Viewer validated and applied exactly one pixel. This was the first successful end-to-end path from natural-language instruction through Ollama to a validated automatic matrix update.
+
+However, human visual review found no meaningful visible wink. The system integration succeeded, while the semantic/visual edit failed.
+
+### Interpretation
+
+Pixel Patch substantially reduced total generation time and allowed a final structured answer to complete, but the prompt remained approximately 16.8K tokens and Thinking still consumed about 10K output tokens. This shows that changing only the output contract does not remove the dominant cost of having the model inspect the full 7,055-pixel matrix.
+
+## Experiment 010 direction: ROI + Review/Retry
+
+The Viewer was therefore extended with two additional mechanisms.
+
+### ROI-first editing
+
+1. Send the rendered PNG and user instruction to the vision model.
+2. Ask for a small rectangular region of interest (ROI) in original pixel coordinates.
+3. Add a small generic margin.
+4. Send only that ROI's matrix plus the palette to the edit call.
+5. Request a Generic Pixel Patch with absolute coordinates.
+
+This keeps semantic localization in the model while reducing the matrix text supplied to the expensive edit step.
+
+### Vision Review / Retry
+
+After each validated patch is applied:
+
+1. render the edited bitmap,
+2. send the resulting PNG to a separate Vision Review call,
+3. ask whether the visible result satisfies the original instruction,
+4. if FAIL, feed the review reason/suggestion into the next edit attempt,
+5. stop on PASS or after a bounded maximum number of attempts.
+
+The default maximum is three attempts and is controlled by application code, not by the model.
+
+Conceptually:
+
+```text
+Instruction + PNG
+       ↓
+   ROI locator
+       ↓
+local matrix + palette + PNG
+       ↓
+   Pixel Patch
+       ↓
+    Validator
+       ↓
+      Apply
+       ↓
+ edited PNG
+       ↓
+ Vision Review
+   ↓ PASS     ↓ FAIL
+ complete   feedback
+              ↓
+          next edit
+```
+
+This preserves the core design constraint: the application has no hard-coded concepts such as eye, wink, character, or expression. The model chooses the semantic target and visual edit; application code provides generic validation, bounded retry control, and deterministic patch application.
+
+### Metrics to collect next
+
+For the same wink task, record:
+
+- ROI localization time/tokens,
+- each Edit call time/tokens,
+- each Review call time/tokens,
+- ROI dimensions,
+- number of patch pixels per attempt,
+- number of attempts,
+- final PASS/FAIL,
+- human visual judgment.
+
+This will test whether reducing input context and adding closed-loop visual verification improves both latency and quality.
