@@ -74,14 +74,14 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <input id="ollamaModel" value="qwen3-vl:8b" aria-label="Ollama model">
 <input id="ollamaUrl" value="http://localhost:11434" aria-label="Ollama URL">
 <input id="ollamaContext" type="number" min="4096" step="4096" value="32768" aria-label="Context size">
-<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0"><input id="ollamaThink" type="checkbox" checked> Thinkingを表示</label>
+<label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0"><input id="ollamaThink" type="checkbox"> Edit Thinking</label>
 <label style="display:flex;align-items:center;gap:8px;font-weight:400;margin:0"><input id="autoReview" type="checkbox" checked> Review/Retry</label>
 <input id="maxAttempts" type="number" min="1" max="5" value="3" aria-label="Max attempts">
 </div>
 <textarea id="aiPrompt" spellcheck="false" style="min-height:110px" placeholder="例: このドット絵の左目を自然にウインクさせて。"></textarea>
 <div class="row"><button class="primary" id="aiSend">Ollamaへ送信</button><button class="secondary" id="copyAiLog">実験ログをコピー</button><button class="secondary" id="aiClear">ログ消去</button><span id="aiStatus" class="status">待機中</span></div>
 <div id="aiLog" class="terminalLog" aria-live="polite">Ollamaの応答をここに表示します。</div>
-<div class="help">PNGからまず編集対象ROIを推定し、その局所matrixだけでPixel Patchを生成します。Patch適用後はVision Reviewを行い、NGなら理由を次の修正へフィードバックします（最大試行回数あり）。</div>
+<div class="help">PNGから編集対象ROIを推定し、座標ラベル付きの拡大ROI画像＋局所matrixでPixel Patchを生成します。Edit Thinkingは既定OFF。Patch適用後はVision Reviewを行い、NGなら理由を次の修正へフィードバックします（最大試行回数あり）。</div>
 </section>
 </div>
 </main>
@@ -283,6 +283,25 @@ function roiMatrix(roi){
   for(let y=y0;y<y1;y++) lines.push('y='+y+': '+d.rows[y].slice(x0,x1).join(','));
   return {x:x0,y:y0,width:x1-x0,height:y1-y0,text:lines.join('\n')};
 }
+function roiCoordinateImage(roi){
+  const d=parseSource(source.value), p=parsePalette(paletteText.value);
+  const cell=32,left=56,top=40,right=8,bottom=8;
+  const out=document.createElement('canvas');
+  out.width=left+roi.width*cell+right; out.height=top+roi.height*cell+bottom;
+  const g=out.getContext('2d'); g.imageSmoothingEnabled=false;
+  g.fillStyle='#20242b'; g.fillRect(0,0,out.width,out.height);
+  g.font='12px Consolas,monospace'; g.textAlign='center'; g.textBaseline='middle';
+  for(let lx=0;lx<roi.width;lx++){g.fillStyle='#f0f0f0';g.fillText(String(roi.x+lx),left+lx*cell+cell/2,top/2)}
+  for(let ly=0;ly<roi.height;ly++){
+    const y=roi.y+ly; g.fillStyle='#f0f0f0';g.textAlign='right';g.fillText(String(y),left-8,top+ly*cell+cell/2);g.textAlign='center';
+    for(let lx=0;lx<roi.width;lx++){
+      const x=roi.x+lx, rgba=p.get(d.rows[y][x]);
+      g.fillStyle='rgba('+rgba.join(',')+')';g.fillRect(left+lx*cell,top+ly*cell,cell,cell);
+      g.strokeStyle='rgba(255,255,255,.22)';g.strokeRect(left+lx*cell+.5,top+ly*cell+.5,cell-1,cell-1);
+    }
+  }
+  return {base64:out.toDataURL('image/png').split(',')[1],w:out.width,h:out.height};
+}
 async function ollamaJson(base,model,numCtx,think,messages,label,phase='unknown',attempt=null){
   const started=performance.now();
   const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:true,think,format:'json',options:{num_ctx:numCtx},messages})});
@@ -333,10 +352,11 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     experimentMetrics[experimentMetrics.length-1].extra='roi='+roi.x+','+roi.y+','+roi.width+','+roi.height;
     let feedback='',success=false;
     for(let attempt=1;attempt<=maxAttempts;attempt++){
-      const local=roiMatrix(roi), before=canvasBase64();
-      const editSystem='Edit pixel art using ONLY a generic Pixel Patch. Return JSON only: {"changes":[{"x":0,"y":0,"color":"1"}]}. Coordinates are absolute zero-based coordinates in the original image. Use only supplied palette IDs. Make the smallest local edit that clearly satisfies the instruction. Never return the full matrix.';
+      const local=roiMatrix(roi), coordImage=roiCoordinateImage(roi);
+      aiLog.textContent+='[Coordinate ROI '+coordImage.w+'×'+coordImage.h+'; x labels '+roi.x+'..'+(roi.x+roi.width-1)+', y labels '+roi.y+'..'+(roi.y+roi.height-1)+']\n';
+      const editSystem='Edit pixel art using ONLY a generic Pixel Patch. The attached image is a magnified ROI with ABSOLUTE x coordinates labeled across the top and ABSOLUTE y coordinates labeled down the left. Use those labels to map visible pixels to exact coordinates. Return JSON only: {"changes":[{"x":0,"y":0,"color":"1"}]}. Coordinates are absolute zero-based coordinates in the original image. Use only supplied palette IDs. Make the smallest local edit that clearly satisfies the instruction. Never return the full matrix.';
       const editUser=instruction+'\nROI: x='+local.x+', y='+local.y+', width='+local.width+', height='+local.height+'\nPALETTE:\n'+paletteText.value.trim()+'\nLOCAL MATRIX:\n'+local.text+(feedback?'\nPREVIOUS REVIEW:\n'+feedback:'');
-      const patch=await ollamaJson(base,model,numCtx,think,[{role:'system',content:editSystem},{role:'user',content:editUser,images:[before.base64]}],'Edit '+attempt+'/'+maxAttempts,'edit',attempt);
+      const patch=await ollamaJson(base,model,numCtx,think,[{role:'system',content:editSystem},{role:'user',content:editUser,images:[coordImage.base64]}],'Edit '+attempt+'/'+maxAttempts,'edit',attempt);
       const changes=extractPatch(JSON.stringify(patch)), diffs=applyPatch(changes), changed=diffs.length;
       aiLog.textContent+='[Patch applied: '+changed+' changed / '+changes.length+' requested]\n';
       appendPixelDiff('PIXEL CHANGE attempt='+attempt,diffs);
