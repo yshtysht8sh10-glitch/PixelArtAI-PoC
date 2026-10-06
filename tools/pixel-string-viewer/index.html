@@ -244,11 +244,21 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     const model=document.querySelector('#ollamaModel').value.trim(); if(!model) throw new Error('モデル名を入力してください');
     const srcLines=source.value.replace(/\r/g,'').split('\n'), header=srcLines.shift();
     const bundle=[header,'@palette',paletteText.value.trim(),'@endpalette',...srcLines].join('\n');
-    const system='You edit pixel art. Return ONLY the complete edited pixel matrix. First line must be the same @format line as input. Then output every matrix row. Do not output palette, markdown fences, explanation, JSON, or coordinates. Preserve width, height, and palette IDs. Make only changes needed for the instruction.';
-    const user=instruction+'\n\nCURRENT PIXEL ART:\n'+bundle;
+    const system='You edit pixel art. You receive both a rendered PNG preview and the exact pixel matrix/palette. Use the image to understand the subject, pose, facial features, and requested visual change. Use the matrix and palette for exact pixel-level editing. Return ONLY the complete edited pixel matrix. First line must be the same @format line as input. Then output every matrix row. Do not output palette, markdown fences, explanation, JSON, or coordinates. Preserve width, height, and palette IDs. Make only changes needed for the instruction.';
+    const user=instruction+'\n\nCURRENT PIXEL ART MATRIX AND PALETTE:\n'+bundle;
+    // Ollama vision messages accept images as base64 strings without the data URL prefix.
+    // Scale up with nearest-neighbor so tiny pixel art is easier for a VLM to inspect.
+    if(!render()) throw new Error('現在のPixel文字列を画像化できません');
+    const vision=document.createElement('canvas');
+    const maxSide=Math.max(canvas.width,canvas.height);
+    const visionScale=Math.max(1,Math.min(8,Math.floor(512/maxSide)));
+    vision.width=canvas.width*visionScale; vision.height=canvas.height*visionScale;
+    const vctx=vision.getContext('2d'); vctx.imageSmoothingEnabled=false;
+    vctx.drawImage(canvas,0,0,vision.width,vision.height);
+    const imageBase64=vision.toDataURL('image/png').split(',')[1];
     btn.disabled=true; aiStatus.className='status'; aiStatus.textContent='Ollamaに問い合わせ中…';
-    aiLog.textContent='> '+instruction+'\n\n';
-    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:false,think:false,messages:[{role:'system',content:system},{role:'user',content:user}]})});
+    aiLog.textContent='> '+instruction+'\n[PNG preview attached: '+canvas.width+'×'+canvas.height+' → '+vision.width+'×'+vision.height+']\n\n';
+    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:false,think:false,messages:[{role:'system',content:system},{role:'user',content:user,images:[imageBase64]}]})});
     if(!res.ok) throw new Error('Ollama HTTP '+res.status+': '+await res.text());
     const data=await res.json();
     const reply=(data.message&&data.message.content)||data.response||'';
