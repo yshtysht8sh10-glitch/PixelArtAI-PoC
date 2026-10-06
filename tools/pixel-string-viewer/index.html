@@ -20,7 +20,7 @@ button{border:0;border-radius:8px;padding:10px 14px;font-weight:700;cursor:point
 .status{font-size:13px;color:#aeb5c2}.error{color:#ff8e8e}
 .help{font-size:13px;color:#aeb5c2;line-height:1.6;margin-top:10px}
 code{background:#0e1014;padding:2px 5px;border-radius:4px}
-.terminal{grid-column:1/-1}.terminal textarea{min-height:180px}.terminalLog{min-height:150px;max-height:300px;overflow:auto;white-space:pre-wrap;background:#0e1014;border:1px solid #3b404b;border-radius:8px;padding:12px;font:13px/1.45 Consolas,monospace}.terminalControls{display:grid;grid-template-columns:180px 1fr;gap:10px}.terminalControls input{background:#0e1014;color:#eee;border:1px solid #3b404b;border-radius:8px;padding:10px;font:14px Consolas,monospace}@media(max-width:800px){.grid{grid-template-columns:1fr}.terminalControls{grid-template-columns:1fr}}
+.terminal{grid-column:1/-1}.terminal textarea{min-height:180px}.terminalLog{min-height:150px;max-height:300px;overflow:auto;white-space:pre-wrap;background:#0e1014;border:1px solid #3b404b;border-radius:8px;padding:12px;font:13px/1.45 Consolas,monospace}.terminalControls{display:grid;grid-template-columns:180px 1fr 150px;gap:10px}.terminalControls input{background:#0e1014;color:#eee;border:1px solid #3b404b;border-radius:8px;padding:10px;font:14px Consolas,monospace}@media(max-width:800px){.grid{grid-template-columns:1fr}.terminalControls{grid-template-columns:1fr}}
 </style>
 </head>
 <body><main>
@@ -73,6 +73,7 @@ code{background:#0e1014;padding:2px 5px;border-radius:4px}
 <div class="terminalControls">
 <input id="ollamaModel" value="qwen3-vl:8b" aria-label="Ollama model">
 <input id="ollamaUrl" value="http://localhost:11434" aria-label="Ollama URL">
+<input id="ollamaContext" type="number" min="4096" step="4096" value="32768" aria-label="Context size">
 </div>
 <textarea id="aiPrompt" spellcheck="false" style="min-height:110px" placeholder="例: このドット絵の左目を自然にウインクさせて。"></textarea>
 <div class="row"><button class="primary" id="aiSend">Ollamaへ送信</button><button class="secondary" id="aiClear">ログ消去</button><span id="aiStatus" class="status">待機中</span></div>
@@ -242,6 +243,7 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     const instruction=aiPrompt.value.trim(); if(!instruction) throw new Error('指示を入力してください');
     const base=document.querySelector('#ollamaUrl').value.trim().replace(/\/$/,'');
     const model=document.querySelector('#ollamaModel').value.trim(); if(!model) throw new Error('モデル名を入力してください');
+    const numCtx=Math.max(4096,Number(document.querySelector('#ollamaContext').value)||32768);
     const srcLines=source.value.replace(/\r/g,'').split('\n'), header=srcLines.shift();
     const bundle=[header,'@palette',paletteText.value.trim(),'@endpalette',...srcLines].join('\n');
     const system='You edit pixel art. You receive both a rendered PNG preview and the exact pixel matrix/palette. Use the image to understand the subject, pose, facial features, and requested visual change. Use the matrix and palette for exact pixel-level editing. Return ONLY the complete edited pixel matrix. First line must be the same @format line as input. Then output every matrix row. Do not output palette, markdown fences, explanation, JSON, or coordinates. Preserve width, height, and palette IDs. Make only changes needed for the instruction.';
@@ -257,8 +259,8 @@ document.querySelector('#aiSend').addEventListener('click',async()=>{
     vctx.drawImage(canvas,0,0,vision.width,vision.height);
     const imageBase64=vision.toDataURL('image/png').split(',')[1];
     btn.disabled=true; aiStatus.className='status'; aiStatus.textContent='Ollamaに問い合わせ中…';
-    aiLog.textContent='> '+instruction+'\n[PNG preview attached: '+canvas.width+'×'+canvas.height+' → '+vision.width+'×'+vision.height+']\n\n';
-    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:false,think:false,messages:[{role:'system',content:system},{role:'user',content:user,images:[imageBase64]}]})});
+    aiLog.textContent='> '+instruction+'\n[PNG preview attached: '+canvas.width+'×'+canvas.height+' → '+vision.width+'×'+vision.height+']\n[Context: '+numCtx.toLocaleString()+' tokens]\n\n';
+    const res=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model,stream:false,think:false,options:{num_ctx:numCtx},messages:[{role:'system',content:system},{role:'user',content:user,images:[imageBase64]}]})});
     if(!res.ok) throw new Error('Ollama HTTP '+res.status+': '+await res.text());
     const data=await res.json();
     const reply=(data.message&&data.message.content)||data.response||'';
